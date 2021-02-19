@@ -4,6 +4,9 @@ mod setup;
 // swapchain, image views
 mod presentation;
 
+// graphics pipeline
+mod pipeline;
+
 use crate::application::setup::LAYER_KHRONOS_VALIDATION;
 
 use erupt::vk;
