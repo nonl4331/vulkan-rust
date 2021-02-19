@@ -10,7 +10,7 @@ mod pipeline;
 use crate::application::setup::LAYER_KHRONOS_VALIDATION;
 
 use erupt::vk;
-use erupt::vk::{Image, ImageView, SurfaceKHR, SwapchainKHR};
+use erupt::vk::{Image, ImageView, SurfaceCapabilitiesKHR, SurfaceKHR, SwapchainKHR};
 use erupt::{utils::surface, DefaultEntryLoader, DeviceLoader, InstanceLoader};
 
 use std::ffi::CStr;
@@ -49,7 +49,13 @@ pub struct Application {
     pub queue: vk::Queue,
     pub swapchain: SwapchainKHR,
     pub swapchain_images: Vec<Image>,
+    pub surface_capabilities: SurfaceCapabilitiesKHR,
     pub swapchain_image_views: Vec<ImageView>,
+    pub shader_vert: vk::ShaderModule,
+    pub shader_frag: vk::ShaderModule,
+    pub render_pass: vk::RenderPass,
+    pub pipeline_layout: vk::PipelineLayout,
+    pub pipeline: vk::Pipeline,
 }
 
 // Main and only impl block
@@ -109,19 +115,32 @@ impl Application {
         });
 
         // create swapchain and get image references
-        let (swapchain, swapchain_images) = presentation::create_swapchain_and_images(
-            &instance,
-            physical_device,
-            surface,
-            surface_format,
-            present_mode,
-            &device,
-        );
+        let (swapchain, swapchain_images, surface_capabilities) =
+            presentation::create_swapchain_and_images(
+                &instance,
+                physical_device,
+                surface,
+                surface_format,
+                present_mode,
+                &device,
+            );
 
         // get swapchain image views
         let swapchain_image_views =
             presentation::get_image_views(&swapchain_images, &device, surface_format);
 
+        let (shader_vert, shader_frag) = pipeline::create_shader_modules(&device);
+
+        // graphics pipeline & render pass
+        let (pipeline, pipeline_layout, render_pass) = pipeline::create_graphics_pipeline(
+            &device,
+            shader_vert,
+            shader_frag,
+            surface_capabilities,
+            surface_format,
+        );
+
+        // Struct creation
         Application {
             event_loop: Some(event_loop),
             window,
@@ -138,7 +157,13 @@ impl Application {
             queue,
             swapchain,
             swapchain_images,
+            surface_capabilities,
             swapchain_image_views,
+            shader_vert,
+            shader_frag,
+            render_pass,
+            pipeline_layout,
+            pipeline,
         }
     }
 
@@ -177,6 +202,23 @@ impl Application {
             Event::LoopDestroyed => unsafe {
                 // wait till finished
                 self.device.device_wait_idle().unwrap();
+
+                // graphics pipeline destruction
+                self.device.destroy_pipeline(Some(self.pipeline), None);
+
+                // render pass destruction
+                self.device
+                    .destroy_render_pass(Some(self.render_pass), None);
+
+                // graphics pipeline layout destruction
+                self.device
+                    .destroy_pipeline_layout(Some(self.pipeline_layout), None);
+
+                // destory shader modules
+                self.device
+                    .destroy_shader_module(Some(self.shader_vert), None);
+                self.device
+                    .destroy_shader_module(Some(self.shader_frag), None);
 
                 // image view destruction
                 for &image_view in &self.swapchain_image_views {

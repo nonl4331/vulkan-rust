@@ -1,5 +1,5 @@
 use erupt::vk;
-use erupt::vk::{Image, ImageView, SwapchainKHR};
+use erupt::vk::{Image, ImageView, SurfaceCapabilitiesKHR, SwapchainKHR};
 use erupt::{DeviceLoader, InstanceLoader};
 
 use std::cmp::{max, min};
@@ -11,7 +11,7 @@ pub fn create_swapchain_and_images(
     format: vk::SurfaceFormatKHR,
     present_mode: vk::PresentModeKHR,
     device: &DeviceLoader,
-) -> (SwapchainKHR, Vec<Image>) {
+) -> (SwapchainKHR, Vec<Image>, SurfaceCapabilitiesKHR) {
     // get surface capabilities
     let surface_capabilities = unsafe {
         instance.get_physical_device_surface_capabilities_khr(physical_device, surface, None)
@@ -43,7 +43,7 @@ pub fn create_swapchain_and_images(
     let swapchain = unsafe { device.create_swapchain_khr(&swapchain_info, None, None) }.unwrap();
     let swapchain_images = unsafe { device.get_swapchain_images_khr(swapchain, None) }.unwrap();
 
-    (swapchain, swapchain_images)
+    (swapchain, swapchain_images, surface_capabilities)
 }
 
 pub fn get_image_views(
