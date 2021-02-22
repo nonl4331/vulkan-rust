@@ -7,6 +7,9 @@ mod presentation;
 // graphics pipeline
 mod pipeline;
 
+// rendering & presentation
+mod render;
+
 use crate::application::setup::LAYER_KHRONOS_VALIDATION;
 
 use erupt::vk;
