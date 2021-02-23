@@ -82,7 +82,7 @@ pub fn record_command_buffers(
             .render_area(screen_size)
             .clear_values(&clear_colors);
 
-        // render triangle in (which is stored in vertex shader code)
+        // render triangle (which is stored in vertex shader code)
         unsafe {
             device.cmd_begin_render_pass(
                 *command_buffer,
