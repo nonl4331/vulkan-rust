@@ -2,6 +2,8 @@ use erupt::vk;
 use erupt::vk::{Framebuffer, ImageView, SurfaceCapabilitiesKHR};
 use erupt::DeviceLoader;
 
+pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
+
 pub fn create_framebuffers(
     device: &DeviceLoader,
     image_views: &Vec<ImageView>,
@@ -97,4 +99,38 @@ pub fn record_command_buffers(
             device.end_command_buffer(*command_buffer).unwrap()
         }
     }
+}
+
+pub fn create_sync_primitives(
+    device: &DeviceLoader,
+    swapchain_size: usize,
+) -> (
+    Vec<vk::Semaphore>,
+    Vec<vk::Semaphore>,
+    Vec<vk::Fence>,
+    Vec<vk::Fence>,
+) {
+    let semaphore_info = vk::SemaphoreCreateInfoBuilder::new();
+    let fence_info = vk::FenceCreateInfoBuilder::new().flags(vk::FenceCreateFlags::SIGNALED);
+
+    let image_available_semaphore: Vec<_> = (0..MAX_FRAMES_IN_FLIGHT)
+        .map(|_| unsafe { device.create_semaphore(&semaphore_info, None, None) }.unwrap())
+        .collect();
+
+    let render_finished_semaphore: Vec<_> = (0..MAX_FRAMES_IN_FLIGHT)
+        .map(|_| unsafe { device.create_semaphore(&semaphore_info, None, None) }.unwrap())
+        .collect();
+
+    let in_flight_fences = (0..MAX_FRAMES_IN_FLIGHT)
+        .map(|_| unsafe { device.create_fence(&fence_info, None, None) }.unwrap())
+        .collect();
+
+    let images_in_flight = (0..swapchain_size).map(|_| vk::Fence::null()).collect();
+
+    (
+        image_available_semaphore,
+        render_finished_semaphore,
+        in_flight_fences,
+        images_in_flight,
+    )
 }

@@ -59,6 +59,14 @@ pub struct Application {
     pub render_pass: vk::RenderPass,
     pub pipeline_layout: vk::PipelineLayout,
     pub pipeline: vk::Pipeline,
+    pub framebuffers: Vec<vk::Framebuffer>,
+    pub command_pool: vk::CommandPool,
+    pub command_buffers: Vec<vk::CommandBuffer>,
+    pub image_available_semaphores: Vec<vk::Semaphore>,
+    pub render_finished_semaphores: Vec<vk::Semaphore>,
+    pub in_flight_fences: Vec<vk::Fence>,
+    pub images_in_flight: Vec<vk::Fence>,
+    current_frame: usize,
 }
 
 // Main and only impl block
@@ -143,6 +151,41 @@ impl Application {
             surface_format,
         );
 
+        // create framebuffers
+        let framebuffers = render::create_framebuffers(
+            &device,
+            &swapchain_image_views,
+            &render_pass,
+            &surface_capabilities,
+        );
+
+        // create command pool
+        let command_pool = render::create_command_pool(&device, queue_family);
+
+        // allocate command buffers
+        let command_buffers =
+            render::allocate_command_buffers(&device, &command_pool, &framebuffers);
+
+        // record command buffers
+        render::record_command_buffers(
+            &device,
+            &pipeline,
+            &command_buffers,
+            &framebuffers,
+            &render_pass,
+            &surface_capabilities,
+        );
+
+        // create semaphores & fences
+        let (
+            image_available_semaphores,
+            render_finished_semaphores,
+            in_flight_fences,
+            images_in_flight,
+        ) = render::create_sync_primitives(&device, swapchain_images.len());
+
+        let current_frame = 0;
+
         // Struct creation
         Application {
             event_loop: Some(event_loop),
@@ -167,6 +210,14 @@ impl Application {
             render_pass,
             pipeline_layout,
             pipeline,
+            framebuffers,
+            command_pool,
+            command_buffers,
+            image_available_semaphores,
+            render_finished_semaphores,
+            in_flight_fences,
+            images_in_flight,
+            current_frame,
         }
     }
 
@@ -176,6 +227,88 @@ impl Application {
             // Init
             Event::NewEvents(StartCause::Init) => {
                 *control_flow = ControlFlow::Poll;
+            }
+
+            Event::MainEventsCleared => {
+                // wait for image at current index to finish render to avoid submiting more than gpu can handle
+                // u64::MAX disables cooldown
+                unsafe {
+                    self.device.wait_for_fences(
+                        &[self.in_flight_fences[self.current_frame]],
+                        true,
+                        u64::MAX,
+                    )
+                }
+                .unwrap();
+
+                // get index of next image in swapchain
+                let image_index = unsafe {
+                    self.device.acquire_next_image_khr(
+                        self.swapchain,
+                        u64::MAX,
+                        Some(self.image_available_semaphores[self.current_frame]),
+                        None,
+                        None,
+                    )
+                }
+                .unwrap();
+
+                // get fence for swapchain image use
+                let image_in_flight = self.images_in_flight[image_index as usize];
+
+                // check if image is in use and if so wait for image to become available
+                if !image_in_flight.is_null() {
+                    unsafe {
+                        self.device
+                            .wait_for_fences(&[image_in_flight], true, u64::MAX)
+                    }
+                    .unwrap();
+                }
+
+                // mark swapchain image for use with current frame
+                self.images_in_flight[image_index as usize] =
+                    self.in_flight_fences[self.current_frame];
+
+                // semaphores for current frame
+                let image_available_semaphore =
+                    vec![self.image_available_semaphores[self.current_frame]];
+                let render_finished_semaphore =
+                    vec![self.render_finished_semaphores[self.current_frame]];
+
+                // submit info takes &vec
+                let command_buffer = vec![self.command_buffers[image_index as usize]];
+
+                let submit_info = vk::SubmitInfoBuilder::new()
+                    .wait_semaphores(&image_available_semaphore)
+                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+                    .command_buffers(&command_buffer)
+                    .signal_semaphores(&render_finished_semaphore);
+
+                // submit queue +
+                unsafe {
+                    let in_flight_fence = self.in_flight_fences[self.current_frame];
+                    self.device.reset_fences(&[in_flight_fence]).unwrap();
+                    self.device
+                        .queue_submit(self.queue, &[submit_info], Some(in_flight_fence))
+                }
+                .unwrap();
+
+                // present info takes &vec[]
+                let swapchain = vec![self.swapchain];
+
+                // present info tkaes &vec[]
+                let image_index = vec![image_index];
+
+                let present_info = vk::PresentInfoKHRBuilder::new()
+                    .wait_semaphores(&render_finished_semaphore)
+                    .swapchains(&swapchain)
+                    .image_indices(&image_index);
+
+                // presentation
+                unsafe { self.device.queue_present_khr(self.queue, &present_info) }.unwrap();
+
+                // get current_frame to next frame
+                self.current_frame = (self.current_frame + 1) % render::MAX_FRAMES_IN_FLIGHT;
             }
 
             // Window events
@@ -205,6 +338,29 @@ impl Application {
             Event::LoopDestroyed => unsafe {
                 // wait till finished
                 self.device.device_wait_idle().unwrap();
+
+                // destroy all semaphores
+                for &semaphore in self
+                    .image_available_semaphores
+                    .iter()
+                    .chain(self.render_finished_semaphores.iter())
+                {
+                    self.device.destroy_semaphore(Some(semaphore), None);
+                }
+
+                // destroy fences (remember in_flight_fences[index_index] = frames_in_flight[current_frame])
+                for &fence in &self.in_flight_fences {
+                    self.device.destroy_fence(Some(fence), None);
+                }
+
+                // destroy command_pool
+                self.device
+                    .destroy_command_pool(Some(self.command_pool), None);
+
+                // destory framebuffers
+                for &framebuffer in &self.framebuffers {
+                    self.device.destroy_framebuffer(Some(framebuffer), None);
+                }
 
                 // graphics pipeline destruction
                 self.device.destroy_pipeline(Some(self.pipeline), None);

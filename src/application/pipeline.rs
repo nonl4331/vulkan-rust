@@ -128,9 +128,20 @@ fn create_render_pass(format: vk::SurfaceFormatKHR, device: &DeviceLoader) -> vk
     let subpasses =
         vec![vk::SubpassDescriptionBuilder::new().color_attachments(&color_attachment_references)];
 
+    // subpass dependency to trigger render_finished_semaphore
+    let dependencies = vec![vk::SubpassDependencyBuilder::new()
+        .src_subpass(vk::SUBPASS_EXTERNAL)
+        .dst_subpass(0)
+        .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+        .src_access_mask(vk::AccessFlags::empty())
+        .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+        .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)];
+
     let render_pass_info = vk::RenderPassCreateInfoBuilder::new()
         .attachments(&attachments)
-        .subpasses(&subpasses);
+        .subpasses(&subpasses)
+        .dependencies(&dependencies);
+
     let render_pass = unsafe { device.create_render_pass(&render_pass_info, None, None) }.unwrap();
 
     render_pass
