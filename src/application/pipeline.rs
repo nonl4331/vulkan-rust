@@ -1,6 +1,6 @@
 use std::os::raw::c_char;
 
-use erupt::{cstr, utils, vk, vk::SurfaceCapabilitiesKHR, DeviceLoader};
+use erupt::{cstr, utils, vk, DeviceLoader};
 
 use std::ffi::CStr;
 
@@ -26,13 +26,10 @@ pub fn create_shader_modules<'a>(device: &DeviceLoader) -> (vk::ShaderModule, vk
 
 // stuff for graphics pipeline bar render pass, pipeline layout (WIP) and shader stages
 fn create_fixed_functions(
-    surface_capabilities: SurfaceCapabilitiesKHR,
     device: &DeviceLoader,
 ) -> (
     vk::PipelineVertexInputStateCreateInfoBuilder<'_>,
     vk::PipelineInputAssemblyStateCreateInfoBuilder<'_>,
-    Vec<vk::ViewportBuilder<'_>>,
-    Vec<vk::Rect2DBuilder<'_>>,
     vk::PipelineRasterizationStateCreateInfoBuilder<'_>,
     vk::PipelineMultisampleStateCreateInfoBuilder<'_>,
     Vec<vk::PipelineColorBlendAttachmentStateBuilder<'_>>,
@@ -45,20 +42,6 @@ fn create_fixed_functions(
     let input_assembly = vk::PipelineInputAssemblyStateCreateInfoBuilder::new()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
         .primitive_restart_enable(false);
-
-    // only one viewport but vec! cause it is possible to have many
-    let viewports = vec![vk::ViewportBuilder::new()
-        .x(0.0)
-        .y(0.0)
-        .width(surface_capabilities.current_extent.width as f32)
-        .height(surface_capabilities.current_extent.height as f32)
-        .min_depth(0.0)
-        .max_depth(1.0)];
-
-    // similar story to viewports and fills the whole screen
-    let scissors = vec![vk::Rect2DBuilder::new()
-        .offset(vk::Offset2D { x: 0, y: 0 })
-        .extent(surface_capabilities.current_extent)];
 
     // pretty normal setttings, backface culling, clockwise front facing
     let rasterizer = vk::PipelineRasterizationStateCreateInfoBuilder::new()
@@ -99,8 +82,6 @@ fn create_fixed_functions(
     (
         vertex_input,
         input_assembly,
-        viewports,
-        scissors,
         rasterizer,
         multisampling,
         color_blend_attachments,
@@ -151,7 +132,6 @@ pub fn create_graphics_pipeline<'a>(
     device: &DeviceLoader,
     shader_vert: vk::ShaderModule,
     shader_frag: vk::ShaderModule,
-    surface_capabilities: SurfaceCapabilitiesKHR,
 
     format: vk::SurfaceFormatKHR,
 ) -> (vk::Pipeline, vk::PipelineLayout, vk::RenderPass) {
@@ -159,18 +139,16 @@ pub fn create_graphics_pipeline<'a>(
     let (
         vertex_input,
         input_assembly,
-        viewports,
-        scissors,
         rasterizer,
         multisampling,
         color_blend_attachments,
         pipeline_layout,
-    ) = create_fixed_functions(surface_capabilities, device);
+    ) = create_fixed_functions(device);
 
     // make the borrow checker happy and create it here :)
     let viewport_state = vk::PipelineViewportStateCreateInfoBuilder::new()
-        .viewports(&viewports)
-        .scissors(&scissors);
+        .viewport_count(1)
+        .scissor_count(1);
 
     // make the borrow checker happy and create it here :)
     let color_blending = vk::PipelineColorBlendStateCreateInfoBuilder::new()
@@ -192,6 +170,12 @@ pub fn create_graphics_pipeline<'a>(
     // create render_pass
     let render_pass = create_render_pass(format, device);
 
+    // dynamic states (for resizing)
+    let dynamic_states = vec![vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+
+    let dynamic_states_info =
+        vk::PipelineDynamicStateCreateInfoBuilder::new().dynamic_states(&dynamic_states);
+
     // le big info struct
     let pipeline_info = vk::GraphicsPipelineCreateInfoBuilder::new()
         .stages(&shader_stages)
@@ -201,6 +185,7 @@ pub fn create_graphics_pipeline<'a>(
         .rasterization_state(&rasterizer)
         .multisample_state(&multisampling)
         .color_blend_state(&color_blending)
+        .dynamic_state(&dynamic_states_info)
         .layout(pipeline_layout)
         .render_pass(render_pass)
         .subpass(0);

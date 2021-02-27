@@ -37,9 +37,8 @@ pub struct Opt {
 
 // Application struct
 pub struct Application {
-    pub event_loop: Option<winit::event_loop::EventLoop<()>>,
+    event_loop: Option<winit::event_loop::EventLoop<()>>,
     pub window: Window,
-    pub instance: InstanceLoader,
     pub messenger: vk::DebugUtilsMessengerEXT,
     pub surface: SurfaceKHR,
     pub device_extensions: Vec<*const i8>,
@@ -62,11 +61,15 @@ pub struct Application {
     pub framebuffers: Vec<vk::Framebuffer>,
     pub command_pool: vk::CommandPool,
     pub command_buffers: Vec<vk::CommandBuffer>,
-    pub image_available_semaphores: Vec<vk::Semaphore>,
-    pub render_finished_semaphores: Vec<vk::Semaphore>,
-    pub in_flight_fences: Vec<vk::Fence>,
-    pub images_in_flight: Vec<vk::Fence>,
+    image_available_semaphores: Vec<vk::Semaphore>,
+    render_finished_semaphores: Vec<vk::Semaphore>,
+    in_flight_fences: Vec<vk::Fence>,
+    images_in_flight: Vec<vk::Fence>,
     current_frame: usize,
+    resized: bool,
+
+    // instance loader is at bottom due to drop order
+    pub instance: InstanceLoader,
 }
 
 // Main and only impl block
@@ -143,13 +146,8 @@ impl Application {
         let (shader_vert, shader_frag) = pipeline::create_shader_modules(&device);
 
         // graphics pipeline & render pass
-        let (pipeline, pipeline_layout, render_pass) = pipeline::create_graphics_pipeline(
-            &device,
-            shader_vert,
-            shader_frag,
-            surface_capabilities,
-            surface_format,
-        );
+        let (pipeline, pipeline_layout, render_pass) =
+            pipeline::create_graphics_pipeline(&device, shader_vert, shader_frag, surface_format);
 
         // create framebuffers
         let framebuffers = render::create_framebuffers(
@@ -184,7 +182,7 @@ impl Application {
             images_in_flight,
         ) = render::create_sync_primitives(&device, swapchain_images.len());
 
-        let current_frame = 0;
+        let (current_frame, resized) = (0, false);
 
         // Struct creation
         Application {
@@ -218,7 +216,107 @@ impl Application {
             in_flight_fences,
             images_in_flight,
             current_frame,
+            resized,
         }
+    }
+
+    fn destroy_swapchain_related_objects(&self) {
+        unsafe {
+            // destory framebuffers
+            for &framebuffer in &self.framebuffers {
+                self.device.destroy_framebuffer(Some(framebuffer), None);
+            }
+
+            // destroy command buffers
+            self.device
+                .free_command_buffers(self.command_pool, &self.command_buffers);
+
+            // graphics pipeline destruction
+            self.device.destroy_pipeline(Some(self.pipeline), None);
+
+            // render pass destruction
+            self.device
+                .destroy_render_pass(Some(self.render_pass), None);
+
+            // graphics pipeline layout destruction
+            self.device
+                .destroy_pipeline_layout(Some(self.pipeline_layout), None);
+
+            // image view destruction
+            for &image_view in &self.swapchain_image_views {
+                self.device.destroy_image_view(Some(image_view), None);
+            }
+
+            // swapchain destruction
+            self.device
+                .destroy_swapchain_khr(Some(self.swapchain), None);
+        }
+    }
+
+    fn resize_window(&mut self) {
+        unsafe {
+            // don't resize in a non idle state
+            self.device.device_wait_idle().unwrap();
+
+            // cleanup swapchain and related devices
+            self.destroy_swapchain_related_objects();
+
+            // create swapchain and get image references
+            let (swapchain, swapchain_images, surface_capabilities) =
+                presentation::create_swapchain_and_images(
+                    &self.instance,
+                    self.physical_device,
+                    self.surface,
+                    self.surface_format,
+                    self.present_mode,
+                    &self.device,
+                );
+
+            // get swapchain image views
+            let swapchain_image_views =
+                presentation::get_image_views(&swapchain_images, &self.device, self.surface_format);
+
+            // graphics pipeline & render pass
+            let (pipeline, pipeline_layout, render_pass) = pipeline::create_graphics_pipeline(
+                &self.device,
+                self.shader_vert,
+                self.shader_frag,
+                self.surface_format,
+            );
+
+            // create framebuffers
+            let framebuffers = render::create_framebuffers(
+                &self.device,
+                &swapchain_image_views,
+                &render_pass,
+                &surface_capabilities,
+            );
+
+            // allocate command buffers
+            let command_buffers =
+                render::allocate_command_buffers(&self.device, &self.command_pool, &framebuffers);
+
+            // record command buffers
+            render::record_command_buffers(
+                &self.device,
+                &pipeline,
+                &command_buffers,
+                &framebuffers,
+                &render_pass,
+                &surface_capabilities,
+            );
+
+            self.swapchain = swapchain;
+            self.swapchain_images = swapchain_images;
+            self.surface_capabilities = surface_capabilities;
+            self.swapchain_image_views = swapchain_image_views;
+            self.pipeline = pipeline;
+            self.pipeline_layout = pipeline_layout;
+            self.render_pass = render_pass;
+            self.framebuffers = framebuffers;
+            self.command_buffers = command_buffers;
+            self.resized = false;
+        };
     }
 
     pub fn run(mut self) -> ! {
@@ -241,8 +339,8 @@ impl Application {
                 }
                 .unwrap();
 
-                // get index of next image in swapchain
-                let image_index = unsafe {
+                // get index of next image in swapchain & check for invalid swapchain
+                let result = unsafe {
                     self.device.acquire_next_image_khr(
                         self.swapchain,
                         u64::MAX,
@@ -250,8 +348,18 @@ impl Application {
                         None,
                         None,
                     )
-                }
-                .unwrap();
+                };
+
+                let image_index = match result.raw {
+                    vk::Result::SUCCESS | vk::Result::SUBOPTIMAL_KHR => result.unwrap(),
+                    vk::Result::ERROR_OUT_OF_DATE_KHR => {
+                        self.resize_window();
+                        return;
+                    }
+                    _ => {
+                        panic!("Failed to aquire swap chain image!");
+                    }
+                };
 
                 // get fence for swapchain image use
                 let image_in_flight = self.images_in_flight[image_index as usize];
@@ -305,7 +413,23 @@ impl Application {
                     .image_indices(&image_index);
 
                 // presentation
-                unsafe { self.device.queue_present_khr(self.queue, &present_info) }.unwrap();
+                let result = unsafe { self.device.queue_present_khr(self.queue, &present_info) };
+
+                if self.resized {
+                    self.resize_window();
+                    return;
+                } else {
+                    match result.raw {
+                        vk::Result::SUCCESS => result.unwrap(),
+                        vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR => {
+                            self.resize_window();
+                            return;
+                        }
+                        _ => {
+                            panic!("Failed to present swap chain image!")
+                        }
+                    }
+                }
 
                 // get current_frame to next frame
                 self.current_frame = (self.current_frame + 1) % render::MAX_FRAMES_IN_FLIGHT;
@@ -315,6 +439,9 @@ impl Application {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
+                }
+                WindowEvent::Resized { .. } => {
+                    self.resized = true;
                 }
                 _ => (),
             },

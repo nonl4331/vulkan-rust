@@ -84,6 +84,19 @@ pub fn record_command_buffers(
             .render_area(screen_size)
             .clear_values(&clear_colors);
 
+        // updated viewport & scissor
+        let viewports = vec![vk::ViewportBuilder::new()
+            .x(0.0)
+            .y(0.0)
+            .width(surface_capabilities.current_extent.width as f32)
+            .height(surface_capabilities.current_extent.height as f32)
+            .min_depth(0.0)
+            .max_depth(1.0)];
+
+        let scissors = vec![vk::Rect2DBuilder::new()
+            .offset(vk::Offset2D { x: 0, y: 0 })
+            .extent(surface_capabilities.current_extent)];
+
         // render triangle (which is stored in vertex shader code)
         unsafe {
             device.cmd_begin_render_pass(
@@ -93,6 +106,11 @@ pub fn record_command_buffers(
             );
 
             device.cmd_bind_pipeline(*command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline);
+
+            // set viewport & scissors (incase of resize)
+            device.cmd_set_viewport(*command_buffer, 0, &viewports);
+            device.cmd_set_scissor(*command_buffer, 0, &scissors);
+
             device.cmd_draw(*command_buffer, 3, 1, 0, 0);
             device.cmd_end_render_pass(*command_buffer);
 

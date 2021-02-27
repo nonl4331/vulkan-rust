@@ -22,7 +22,10 @@ pub fn create_swapchain_and_images(
     let mut image_count = surface_capabilities.min_image_count + 1;
 
     // prevent image_count from being 0 or larger than max capabilites of the surface
-    image_count = min(image_count, max(surface_capabilities.max_image_count, 1));
+    image_count = min(
+        image_count,
+        max(surface_capabilities.max_image_count, image_count),
+    );
 
     let swapchain_info = vk::SwapchainCreateInfoKHRBuilder::new()
         .surface(surface)
