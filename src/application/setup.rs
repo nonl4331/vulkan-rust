@@ -129,8 +129,8 @@ pub fn pick_physical_device_and_queue_family(
             };
 
             let present_mode = instance.get_physical_device_surface_present_modes_khr(physical_device, *surface, None)
-            // prefer vsync
-                .unwrap().into_iter().find(|present_mode| present_mode == &vk::PresentModeKHR::MAILBOX_KHR)
+            // prefer uncapped fps
+                .unwrap().into_iter().find(|present_mode| present_mode == &vk::PresentModeKHR::IMMEDIATE_KHR)
                 // FIFO as fallback
                 .unwrap_or(vk::PresentModeKHR::FIFO_KHR);
 

@@ -2,6 +2,8 @@ use std::os::raw::c_char;
 
 use erupt::{cstr, utils, vk, DeviceLoader};
 
+use crate::application::model;
+
 use std::ffi::CStr;
 
 // shader spvs
@@ -28,16 +30,12 @@ pub fn create_shader_modules<'a>(device: &DeviceLoader) -> (vk::ShaderModule, vk
 fn create_fixed_functions(
     device: &DeviceLoader,
 ) -> (
-    vk::PipelineVertexInputStateCreateInfoBuilder<'_>,
     vk::PipelineInputAssemblyStateCreateInfoBuilder<'_>,
     vk::PipelineRasterizationStateCreateInfoBuilder<'_>,
     vk::PipelineMultisampleStateCreateInfoBuilder<'_>,
     Vec<vk::PipelineColorBlendAttachmentStateBuilder<'_>>,
     vk::PipelineLayout,
 ) {
-    // triangle is built into vertex shader so no input (for now)
-    let vertex_input = vk::PipelineVertexInputStateCreateInfoBuilder::new();
-
     // how vertices are interpreted, TRIANGLE_LIST is just regular triangles not triangle strip
     let input_assembly = vk::PipelineInputAssemblyStateCreateInfoBuilder::new()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -80,7 +78,6 @@ fn create_fixed_functions(
         unsafe { device.create_pipeline_layout(&pipeline_layout_info, None, None) }.unwrap();
 
     (
-        vertex_input,
         input_assembly,
         rasterizer,
         multisampling,
@@ -135,15 +132,17 @@ pub fn create_graphics_pipeline<'a>(
 
     format: vk::SurfaceFormatKHR,
 ) -> (vk::Pipeline, vk::PipelineLayout, vk::RenderPass) {
+    // vertex info
+    let binding_descriptions = [model::Vertex::get_binding_descriptions()];
+    let attribute_descriptions = model::Vertex::get_attribute_descriptions();
+
+    let vertex_input = vk::PipelineVertexInputStateCreateInfoBuilder::new()
+        .vertex_binding_descriptions(&binding_descriptions)
+        .vertex_attribute_descriptions(&attribute_descriptions);
+
     // create fixed functions
-    let (
-        vertex_input,
-        input_assembly,
-        rasterizer,
-        multisampling,
-        color_blend_attachments,
-        pipeline_layout,
-    ) = create_fixed_functions(device);
+    let (input_assembly, rasterizer, multisampling, color_blend_attachments, pipeline_layout) =
+        create_fixed_functions(device);
 
     // make the borrow checker happy and create it here :)
     let viewport_state = vk::PipelineViewportStateCreateInfoBuilder::new()

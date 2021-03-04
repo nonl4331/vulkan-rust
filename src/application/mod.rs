@@ -10,7 +10,11 @@ mod pipeline;
 // rendering & presentation
 mod render;
 
+// model loading
+mod model;
+
 use crate::application::setup::LAYER_KHRONOS_VALIDATION;
+use winit::dpi::PhysicalSize;
 
 use erupt::vk;
 use erupt::vk::{Image, ImageView, SurfaceCapabilitiesKHR, SurfaceKHR, SwapchainKHR};
@@ -60,6 +64,8 @@ pub struct Application {
     pub pipeline: vk::Pipeline,
     pub framebuffers: Vec<vk::Framebuffer>,
     pub command_pool: vk::CommandPool,
+    pub vertex_buffer: vk::Buffer,
+    pub vertex_buffer_memory: vk::DeviceMemory,
     pub command_buffers: Vec<vk::CommandBuffer>,
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
@@ -160,6 +166,9 @@ impl Application {
         // create command pool
         let command_pool = render::create_command_pool(&device, queue_family);
 
+        let (vertex_buffer, vertex_buffer_memory) =
+            model::create_vertex_buffer(&instance, &device, &physical_device);
+
         // allocate command buffers
         let command_buffers =
             render::allocate_command_buffers(&device, &command_pool, &framebuffers);
@@ -172,6 +181,7 @@ impl Application {
             &framebuffers,
             &render_pass,
             &surface_capabilities,
+            &vertex_buffer,
         );
 
         // create semaphores & fences
@@ -210,6 +220,8 @@ impl Application {
             pipeline,
             framebuffers,
             command_pool,
+            vertex_buffer,
+            vertex_buffer_memory,
             command_buffers,
             image_available_semaphores,
             render_finished_semaphores,
@@ -304,6 +316,7 @@ impl Application {
                 &framebuffers,
                 &render_pass,
                 &surface_capabilities,
+                &self.vertex_buffer,
             );
 
             self.swapchain = swapchain;
@@ -441,6 +454,11 @@ impl Application {
                     *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Resized { .. } => {
+                    // halt on minimization?
+                    if self.window.inner_size() == PhysicalSize::new(0, 0) {
+                        *control_flow = ControlFlow::Wait;
+                    }
+
                     self.resized = true;
                 }
                 _ => (),

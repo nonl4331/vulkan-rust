@@ -2,6 +2,8 @@ use erupt::vk;
 use erupt::vk::{Framebuffer, ImageView, SurfaceCapabilitiesKHR};
 use erupt::DeviceLoader;
 
+use crate::application::model::VERTICES;
+
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 pub fn create_framebuffers(
@@ -56,6 +58,7 @@ pub fn record_command_buffers(
     framebuffers: &Vec<Framebuffer>,
     render_pass: &vk::RenderPass,
     surface_capabilities: &SurfaceCapabilitiesKHR,
+    vertex_buffer: &vk::Buffer,
 ) {
     // command buffer for each framebuffer
     for (command_buffer, framebuffer) in command_buffers.iter().zip(framebuffers.iter()) {
@@ -107,11 +110,16 @@ pub fn record_command_buffers(
 
             device.cmd_bind_pipeline(*command_buffer, vk::PipelineBindPoint::GRAPHICS, *pipeline);
 
+            // set vertex buffer
+            let vertex_buffers = &[*vertex_buffer];
+            let offsets = [0];
+            device.cmd_bind_vertex_buffers(*command_buffer, 0, vertex_buffers, &offsets);
+
             // set viewport & scissors (incase of resize)
             device.cmd_set_viewport(*command_buffer, 0, &viewports);
             device.cmd_set_scissor(*command_buffer, 0, &scissors);
 
-            device.cmd_draw(*command_buffer, 3, 1, 0, 0);
+            device.cmd_draw(*command_buffer, VERTICES.len() as u32, 1, 0, 0);
             device.cmd_end_render_pass(*command_buffer);
 
             device.end_command_buffer(*command_buffer).unwrap()
