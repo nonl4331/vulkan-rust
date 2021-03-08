@@ -166,8 +166,13 @@ impl Application {
         // create command pool
         let command_pool = render::create_command_pool(&device, queue_family);
 
-        let (vertex_buffer, vertex_buffer_memory) =
-            model::create_vertex_buffer(&instance, &device, &physical_device);
+        let (vertex_buffer, vertex_buffer_memory) = model::create_vertex_buffer(
+            &instance,
+            &device,
+            &physical_device,
+            &command_pool,
+            &queue,
+        );
 
         // allocate command buffers
         let command_buffers =
@@ -481,8 +486,13 @@ impl Application {
 
             // Loop destruction
             Event::LoopDestroyed => unsafe {
-                // wait till finished
-                self.device.device_wait_idle().unwrap();
+                // destroys objects that need change with window resize
+                self.destroy_swapchain_related_objects();
+
+                // destory vertex buffer and free memory
+                self.device.destroy_buffer(Some(self.vertex_buffer), None);
+                self.device
+                    .free_memory(Some(self.vertex_buffer_memory), None);
 
                 // destroy all semaphores
                 for &semaphore in self
@@ -502,36 +512,11 @@ impl Application {
                 self.device
                     .destroy_command_pool(Some(self.command_pool), None);
 
-                // destory framebuffers
-                for &framebuffer in &self.framebuffers {
-                    self.device.destroy_framebuffer(Some(framebuffer), None);
-                }
-
-                // graphics pipeline destruction
-                self.device.destroy_pipeline(Some(self.pipeline), None);
-
-                // render pass destruction
-                self.device
-                    .destroy_render_pass(Some(self.render_pass), None);
-
-                // graphics pipeline layout destruction
-                self.device
-                    .destroy_pipeline_layout(Some(self.pipeline_layout), None);
-
                 // destory shader modules
                 self.device
                     .destroy_shader_module(Some(self.shader_vert), None);
                 self.device
                     .destroy_shader_module(Some(self.shader_frag), None);
-
-                // image view destruction
-                for &image_view in &self.swapchain_image_views {
-                    self.device.destroy_image_view(Some(image_view), None);
-                }
-
-                // swapchain destruction
-                self.device
-                    .destroy_swapchain_khr(Some(self.swapchain), None);
 
                 // logical device destruction
                 self.device.destroy_device(None);

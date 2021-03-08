@@ -5,22 +5,22 @@ use std::mem::size_of;
 
 pub const VERTICES: [Vertex; 3] = [
     Vertex {
-        pos: [0.0, -0.5],
-        color: [1.0, 0.0, 0.0],
+        _pos: [0.0, -0.5],
+        _color: [1.0, 0.0, 0.0],
     },
     Vertex {
-        pos: [0.5, 0.5],
-        color: [0.0, 1.0, 0.0],
+        _pos: [0.5, 0.5],
+        _color: [0.0, 1.0, 0.0],
     },
     Vertex {
-        pos: [-0.5, 0.5],
-        color: [0.0, 0.0, 1.0],
+        _pos: [-0.5, 0.5],
+        _color: [0.0, 0.0, 1.0],
     },
 ];
 
 pub struct Vertex {
-    pos: [f32; 2],
-    color: [f32; 3],
+    _pos: [f32; 2],
+    _color: [f32; 3],
 }
 
 impl Vertex {
@@ -51,22 +51,105 @@ impl Vertex {
     }
 }
 
+pub fn create_buffer(
+    instance: &InstanceLoader,
+    physical_device: &vk::PhysicalDevice,
+    device: &DeviceLoader,
+    buffer_size: u64,
+    usage: vk::BufferUsageFlags,
+    sharing_mode: vk::SharingMode,
+    properties: vk::MemoryPropertyFlags,
+) -> (vk::Buffer, vk::DeviceMemory) {
+    let buffer_info = vk::BufferCreateInfoBuilder::new()
+        .size(buffer_size)
+        .usage(usage)
+        .sharing_mode(sharing_mode);
+
+    // create buffer
+    let buffer = unsafe { device.create_buffer(&buffer_info, None, None) }.unwrap();
+
+    // get buffer memory requirements
+    let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer, None) };
+
+    // start to allocate buffer
+    let allocation_info = vk::MemoryAllocateInfoBuilder::new()
+        .allocation_size(memory_requirements.size)
+        .memory_type_index(find_physical_device_memory(
+            instance,
+            physical_device,
+            memory_requirements.memory_type_bits,
+            properties,
+        ));
+
+    // allocate buffer memory
+    let buffer_memory = unsafe { device.allocate_memory(&allocation_info, None, None) }
+        .expect("Failed to allocate staging buffer memory!");
+
+    // bind such memory with buffer
+    unsafe { device.bind_buffer_memory(buffer, buffer_memory, 0) }
+        .expect("Failed to bind vertex staging memory");
+
+    (buffer, buffer_memory)
+}
+
 pub fn create_vertex_buffer(
     instance: &InstanceLoader,
     device: &DeviceLoader,
     physical_device: &vk::PhysicalDevice,
+    command_pool: &vk::CommandPool,
+    queue: &vk::Queue,
 ) -> (vk::Buffer, vk::DeviceMemory) {
-    // pretty normal buffer is of size VERTICES as is used as a vertex buffer
-    let buffer_info = vk::BufferCreateInfoBuilder::new()
-        .size((size_of::<Vertex>() * VERTICES.len()) as u64)
-        .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-        .sharing_mode(vk::SharingMode::EXCLUSIVE);
+    let buffer_size = (size_of::<Vertex>() * VERTICES.len()) as u64;
 
-    let buffer = unsafe { device.create_buffer(&buffer_info, None, None) }.unwrap();
+    // create temp staging buffer
+    let (staging_buffer, staging_buffer_memory) = create_buffer(
+        instance,
+        physical_device,
+        device,
+        buffer_size,
+        // used as the source for the transfer from host visible memory
+        // to (possibly) more optimized memory (that might not be host visible)
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::SharingMode::EXCLUSIVE,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+    );
 
-    let buffer_memory = allocate_vertex_buffer(instance, device, physical_device, &buffer);
+    // copy vertex data to staging buffer
+    copy_to_staging_buffer(
+        instance,
+        device,
+        physical_device,
+        &staging_buffer,
+        &staging_buffer_memory,
+    );
 
-    (buffer, buffer_memory)
+    // create real vertex buffer
+    let (vertex_buffer, vertex_buffer_memory) = create_buffer(
+        instance,
+        physical_device,
+        device,
+        buffer_size,
+        vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+        vk::SharingMode::EXCLUSIVE,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    );
+
+    // copy from host visible staging buffer
+    // to device local vertex buffer
+    copy_buffer(
+        device,
+        command_pool,
+        queue,
+        &staging_buffer,
+        &vertex_buffer,
+        buffer_size,
+    );
+
+    // clean up staging buffer & memory
+    unsafe { device.destroy_buffer(Some(staging_buffer), None) };
+    unsafe { device.free_memory(Some(staging_buffer_memory), None) };
+
+    (vertex_buffer, vertex_buffer_memory)
 }
 
 fn find_physical_device_memory(
@@ -89,36 +172,13 @@ fn find_physical_device_memory(
         .expect("Failed to find valid memory for vertex buffer allocation!")
 }
 
-pub fn allocate_vertex_buffer(
-    instance: &InstanceLoader,
+pub fn copy_to_staging_buffer(
+    _instance: &InstanceLoader,
     device: &DeviceLoader,
-    physical_device: &vk::PhysicalDevice,
-    buffer: &vk::Buffer,
-) -> vk::DeviceMemory {
-    // get vertex buffer memory requirements
-    let memory_requirements = unsafe { device.get_buffer_memory_requirements(*buffer, None) };
-
-    let properties: vk::MemoryPropertyFlags =
-        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
-
-    // start to allocate vertex buffer
-    let allocation_info = vk::MemoryAllocateInfoBuilder::new()
-        .allocation_size(memory_requirements.size)
-        .memory_type_index(find_physical_device_memory(
-            instance,
-            physical_device,
-            memory_requirements.memory_type_bits,
-            properties,
-        ));
-
-    // allocate vertex buffer memory
-    let buffer_memory = unsafe { device.allocate_memory(&allocation_info, None, None) }
-        .expect("Failed to allocate vertex buffer memory!");
-
-    // bind such memory with buffer
-    unsafe { device.bind_buffer_memory(*buffer, buffer_memory, 0) }
-        .expect("Failed to bind vertex buffer memory");
-
+    _physical_device: &vk::PhysicalDevice,
+    _buffer: &vk::Buffer,
+    buffer_memory: &vk::DeviceMemory,
+) {
     // copy vertex data to buffer
     unsafe {
         let mut data: *mut c_void = core::ptr::null_mut();
@@ -126,7 +186,7 @@ pub fn allocate_vertex_buffer(
         // map physical_device memory to *data so we can copy onto it
         device
             .map_memory(
-                buffer_memory,
+                *buffer_memory,
                 0,
                 (size_of::<Vertex>() * VERTICES.len()) as u64,
                 None,
@@ -142,8 +202,46 @@ pub fn allocate_vertex_buffer(
         );
 
         // unmap physical_device memory as we have copied the needed data over
-        device.unmap_memory(buffer_memory);
-    }
+        device.unmap_memory(*buffer_memory);
+    };
+}
 
-    buffer_memory
+fn copy_buffer(
+    device: &DeviceLoader,
+    command_pool: &vk::CommandPool,
+    queue: &vk::Queue,
+    src_buffer: &vk::Buffer,
+    dst_buffer: &vk::Buffer,
+    buffer_size: u64,
+) {
+    // allocate temp command buffer for copy operation
+    let command_buffer_allocate_info = vk::CommandBufferAllocateInfoBuilder::new()
+        .level(vk::CommandBufferLevel::PRIMARY)
+        .command_pool(*command_pool)
+        .command_buffer_count(1);
+
+    let command_buffer =
+        unsafe { device.allocate_command_buffers(&command_buffer_allocate_info) }.unwrap();
+
+    let begin_info = vk::CommandBufferBeginInfoBuilder::new()
+        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+    // begin copy operation
+    unsafe { device.begin_command_buffer(command_buffer[0], &begin_info) }.unwrap();
+
+    let copy_region = vec![vk::BufferCopyBuilder::new().size(buffer_size)];
+
+    unsafe { device.cmd_copy_buffer(command_buffer[0], *src_buffer, *dst_buffer, &copy_region) };
+
+    unsafe { device.end_command_buffer(command_buffer[0]) }.unwrap();
+
+    let submit_info = vk::SubmitInfoBuilder::new().command_buffers(&command_buffer);
+
+    // submit command buffer to queue
+    unsafe { device.queue_submit(*queue, &[submit_info], None) }.unwrap();
+
+    // wait idle then free command buffer
+    unsafe { device.queue_wait_idle(*queue) }.unwrap();
+
+    unsafe { device.free_command_buffers(*command_pool, &command_buffer) };
 }
