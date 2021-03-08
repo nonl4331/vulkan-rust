@@ -35,6 +35,8 @@ pub fn create_instance(window: &Window, entry: &DefaultEntryLoader) -> InstanceL
     if opt.validation {
         // extension for debug callback
         instance_extensions.push(vk::EXT_DEBUG_UTILS_EXTENSION_NAME);
+
+        println!("Validation layers enabled.");
     }
 
     // instance layers (pretty much just validation layers)

@@ -3,20 +3,28 @@ use erupt::{vk, DeviceLoader, InstanceLoader};
 
 use std::mem::size_of;
 
-pub const VERTICES: [Vertex; 3] = [
+type Index = u32;
+
+pub const VERTICES: [Vertex; 4] = [
     Vertex {
-        _pos: [0.0, -0.5],
+        _pos: [-0.5, -0.5],
         _color: [1.0, 0.0, 0.0],
     },
     Vertex {
-        _pos: [0.5, 0.5],
+        _pos: [0.5, -0.5],
         _color: [0.0, 1.0, 0.0],
     },
     Vertex {
-        _pos: [-0.5, 0.5],
+        _pos: [0.5, 0.5],
         _color: [0.0, 0.0, 1.0],
     },
+    Vertex {
+        _pos: [-0.5, 0.5],
+        _color: [1.0, 1.0, 1.0],
+    },
 ];
+
+pub const INDICIES: [Index; 6] = [0, 1, 2, 2, 3, 0];
 
 pub struct Vertex {
     _pos: [f32; 2],
@@ -115,12 +123,14 @@ pub fn create_vertex_buffer(
     );
 
     // copy vertex data to staging buffer
-    copy_to_staging_buffer(
+    copy_to_staging_buffer::<[Vertex; 4]>(
         instance,
         device,
         physical_device,
         &staging_buffer,
         &staging_buffer_memory,
+        &VERTICES,
+        VERTICES.len() * size_of::<Vertex>(),
     );
 
     // create real vertex buffer
@@ -152,6 +162,68 @@ pub fn create_vertex_buffer(
     (vertex_buffer, vertex_buffer_memory)
 }
 
+pub fn create_index_buffer(
+    instance: &InstanceLoader,
+    device: &DeviceLoader,
+    physical_device: &vk::PhysicalDevice,
+    command_pool: &vk::CommandPool,
+    queue: &vk::Queue,
+) -> (vk::Buffer, vk::DeviceMemory) {
+    let buffer_size = (size_of::<Index>() * INDICIES.len()) as u64;
+
+    // create temp staging buffer
+    let (staging_buffer, staging_buffer_memory) = create_buffer(
+        instance,
+        physical_device,
+        device,
+        buffer_size,
+        // used as the source for the transfer from host visible memory
+        // to (possibly) more optimized memory (that might not be host visible)
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::SharingMode::EXCLUSIVE,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+    );
+
+    // copy index data to staging buffer
+    copy_to_staging_buffer::<[Index; 6]>(
+        instance,
+        device,
+        physical_device,
+        &staging_buffer,
+        &staging_buffer_memory,
+        &INDICIES,
+        INDICIES.len() * size_of::<Index>(),
+    );
+
+    // create real index buffer
+    let (index_buffer, index_buffer_memory) = create_buffer(
+        instance,
+        physical_device,
+        device,
+        buffer_size,
+        vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+        vk::SharingMode::EXCLUSIVE,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    );
+
+    // copy from host visible staging buffer
+    // to device local index buffer
+    copy_buffer(
+        &device,
+        &command_pool,
+        &queue,
+        &staging_buffer,
+        &index_buffer,
+        buffer_size,
+    );
+
+    // clean up staging buffer & memory
+    unsafe { device.destroy_buffer(Some(staging_buffer), None) };
+    unsafe { device.free_memory(Some(staging_buffer_memory), None) };
+
+    (index_buffer, index_buffer_memory)
+}
+
 fn find_physical_device_memory(
     instance: &InstanceLoader,
     physical_device: &vk::PhysicalDevice,
@@ -172,34 +244,26 @@ fn find_physical_device_memory(
         .expect("Failed to find valid memory for vertex buffer allocation!")
 }
 
-pub fn copy_to_staging_buffer(
+pub fn copy_to_staging_buffer<T>(
     _instance: &InstanceLoader,
     device: &DeviceLoader,
     _physical_device: &vk::PhysicalDevice,
     _buffer: &vk::Buffer,
     buffer_memory: &vk::DeviceMemory,
+    buffer_data: &T,
+    buffer_size: usize,
 ) {
-    // copy vertex data to buffer
+    // copy data to buffer
     unsafe {
         let mut data: *mut c_void = core::ptr::null_mut();
 
         // map physical_device memory to *data so we can copy onto it
         device
-            .map_memory(
-                *buffer_memory,
-                0,
-                (size_of::<Vertex>() * VERTICES.len()) as u64,
-                None,
-                &mut data,
-            )
+            .map_memory(*buffer_memory, 0, buffer_size as u64, None, &mut data)
             .expect("Failed to map memory for vertex buffer!");
 
-        // copy over vertex data to buffer
-        core::ptr::copy(
-            &VERTICES,
-            data as *mut [Vertex; 3],
-            size_of::<Vertex>() * VERTICES.len(),
-        );
+        // copy over data to buffer
+        core::ptr::copy(buffer_data, data as *mut T, buffer_size);
 
         // unmap physical_device memory as we have copied the needed data over
         device.unmap_memory(*buffer_memory);

@@ -2,7 +2,7 @@ use erupt::vk;
 use erupt::vk::{Framebuffer, ImageView, SurfaceCapabilitiesKHR};
 use erupt::DeviceLoader;
 
-use crate::application::model::VERTICES;
+use crate::application::model::INDICIES;
 
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
@@ -59,6 +59,7 @@ pub fn record_command_buffers(
     render_pass: &vk::RenderPass,
     surface_capabilities: &SurfaceCapabilitiesKHR,
     vertex_buffer: &vk::Buffer,
+    index_buffer: &vk::Buffer,
 ) {
     // command buffer for each framebuffer
     for (command_buffer, framebuffer) in command_buffers.iter().zip(framebuffers.iter()) {
@@ -115,11 +116,13 @@ pub fn record_command_buffers(
             let offsets = [0];
             device.cmd_bind_vertex_buffers(*command_buffer, 0, vertex_buffers, &offsets);
 
+            device.cmd_bind_index_buffer(*command_buffer, *index_buffer, 0, vk::IndexType::UINT32);
+
             // set viewport & scissors (incase of resize)
             device.cmd_set_viewport(*command_buffer, 0, &viewports);
             device.cmd_set_scissor(*command_buffer, 0, &scissors);
 
-            device.cmd_draw(*command_buffer, VERTICES.len() as u32, 1, 0, 0);
+            device.cmd_draw_indexed(*command_buffer, INDICIES.len() as u32, 1, 0, 0, 0);
             device.cmd_end_render_pass(*command_buffer);
 
             device.end_command_buffer(*command_buffer).unwrap()

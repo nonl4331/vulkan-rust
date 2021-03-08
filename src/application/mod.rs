@@ -66,6 +66,8 @@ pub struct Application {
     pub command_pool: vk::CommandPool,
     pub vertex_buffer: vk::Buffer,
     pub vertex_buffer_memory: vk::DeviceMemory,
+    pub index_buffer: vk::Buffer,
+    pub index_buffer_memory: vk::DeviceMemory,
     pub command_buffers: Vec<vk::CommandBuffer>,
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
@@ -166,6 +168,7 @@ impl Application {
         // create command pool
         let command_pool = render::create_command_pool(&device, queue_family);
 
+        // create vertex_buffer
         let (vertex_buffer, vertex_buffer_memory) = model::create_vertex_buffer(
             &instance,
             &device,
@@ -173,6 +176,10 @@ impl Application {
             &command_pool,
             &queue,
         );
+
+        // create index_buffer
+        let (index_buffer, index_buffer_memory) =
+            model::create_index_buffer(&instance, &device, &physical_device, &command_pool, &queue);
 
         // allocate command buffers
         let command_buffers =
@@ -187,6 +194,7 @@ impl Application {
             &render_pass,
             &surface_capabilities,
             &vertex_buffer,
+            &index_buffer,
         );
 
         // create semaphores & fences
@@ -227,6 +235,8 @@ impl Application {
             command_pool,
             vertex_buffer,
             vertex_buffer_memory,
+            index_buffer,
+            index_buffer_memory,
             command_buffers,
             image_available_semaphores,
             render_finished_semaphores,
@@ -322,6 +332,7 @@ impl Application {
                 &render_pass,
                 &surface_capabilities,
                 &self.vertex_buffer,
+                &self.index_buffer,
             );
 
             self.swapchain = swapchain;
@@ -488,6 +499,11 @@ impl Application {
             Event::LoopDestroyed => unsafe {
                 // destroys objects that need change with window resize
                 self.destroy_swapchain_related_objects();
+
+                // destory index buffer and free memory
+                self.device.destroy_buffer(Some(self.index_buffer), None);
+                self.device
+                    .free_memory(Some(self.index_buffer_memory), None);
 
                 // destory vertex buffer and free memory
                 self.device.destroy_buffer(Some(self.vertex_buffer), None);
