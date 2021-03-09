@@ -13,6 +13,9 @@ mod render;
 // model loading
 mod model;
 
+// buffers
+mod buffer;
+
 use crate::application::setup::LAYER_KHRONOS_VALIDATION;
 use winit::dpi::PhysicalSize;
 
@@ -169,7 +172,7 @@ impl Application {
         let command_pool = render::create_command_pool(&device, queue_family);
 
         // create vertex_buffer
-        let (vertex_buffer, vertex_buffer_memory) = model::create_vertex_buffer(
+        let (vertex_buffer, vertex_buffer_memory) = buffer::create_vertex_buffer(
             &instance,
             &device,
             &physical_device,
@@ -178,8 +181,13 @@ impl Application {
         );
 
         // create index_buffer
-        let (index_buffer, index_buffer_memory) =
-            model::create_index_buffer(&instance, &device, &physical_device, &command_pool, &queue);
+        let (index_buffer, index_buffer_memory) = buffer::create_index_buffer(
+            &instance,
+            &device,
+            &physical_device,
+            &command_pool,
+            &queue,
+        );
 
         // allocate command buffers
         let command_buffers =
