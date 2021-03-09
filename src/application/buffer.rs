@@ -19,7 +19,8 @@ pub fn create_buffer(
         .sharing_mode(sharing_mode);
 
     // create buffer
-    let buffer = unsafe { device.create_buffer(&buffer_info, None, None) }.unwrap();
+    let buffer = unsafe { device.create_buffer(&buffer_info, None, None) }
+        .expect("Failed to create buffer!");
 
     // get buffer memory requirements
     let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer, None) };
@@ -229,28 +230,32 @@ fn copy_buffer(
         .command_pool(*command_pool)
         .command_buffer_count(1);
 
-    let command_buffer =
-        unsafe { device.allocate_command_buffers(&command_buffer_allocate_info) }.unwrap();
+    let command_buffer = unsafe { device.allocate_command_buffers(&command_buffer_allocate_info) }
+        .expect("Failed to allocate copy command buffer!");
 
     let begin_info = vk::CommandBufferBeginInfoBuilder::new()
         .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
     // begin copy operation
-    unsafe { device.begin_command_buffer(command_buffer[0], &begin_info) }.unwrap();
+    unsafe { device.begin_command_buffer(command_buffer[0], &begin_info) }
+        .expect("Failed to begin recording copy command buffer!");
 
     let copy_region = vec![vk::BufferCopyBuilder::new().size(buffer_size)];
 
     unsafe { device.cmd_copy_buffer(command_buffer[0], *src_buffer, *dst_buffer, &copy_region) };
 
-    unsafe { device.end_command_buffer(command_buffer[0]) }.unwrap();
+    unsafe { device.end_command_buffer(command_buffer[0]) }
+        .expect("Failed to end recording copy command buffer!");
 
     let submit_info = vk::SubmitInfoBuilder::new().command_buffers(&command_buffer);
 
     // submit command buffer to queue
-    unsafe { device.queue_submit(*queue, &[submit_info], None) }.unwrap();
+    unsafe { device.queue_submit(*queue, &[submit_info], None) }
+        .expect("Failed to submit queue with copy command buffer!");
 
     // wait idle then free command buffer
-    unsafe { device.queue_wait_idle(*queue) }.unwrap();
+    unsafe { device.queue_wait_idle(*queue) }
+        .expect("Queue wait idle failed in copy buffer function!");
 
     unsafe { device.free_command_buffers(*command_pool, &command_buffer) };
 }

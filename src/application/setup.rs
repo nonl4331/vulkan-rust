@@ -18,8 +18,8 @@ pub fn create_instance(window: &Window, entry: &DefaultEntryLoader) -> InstanceL
     // cmd arguments
     let opt = Opt::from_args();
 
-    let application_name = CString::new("WIP").unwrap();
-    let engine_name = CString::new("No Engine").unwrap();
+    let application_name = CString::new("WIP").expect("Failed to create CString for application name!");
+    let engine_name = CString::new("No Engine").expect("Failed to create CString for engine name!");
 
     // generic application infomation
     let application_info = vk::ApplicationInfoBuilder::new()
@@ -29,7 +29,7 @@ pub fn create_instance(window: &Window, entry: &DefaultEntryLoader) -> InstanceL
         .engine_version(vk::make_version(1, 0, 0));
 
     // instance extensions required by winit surface
-    let mut instance_extensions = surface::enumerate_required_extensions(window).unwrap();
+    let mut instance_extensions = surface::enumerate_required_extensions(window).expect("Failed to enumerate require instance extensions by surface!");
 
     // check for -v --validation flags and enable/disable validation layers
     if opt.validation {
@@ -76,7 +76,7 @@ pub fn setup_debug_messenger(instance: &InstanceLoader) -> vk::DebugUtilsMesseng
             )
             .pfn_user_callback(Some(debug_callback));
 
-        unsafe { instance.create_debug_utils_messenger_ext(&messenger_info, None, None) }.unwrap()
+        unsafe { instance.create_debug_utils_messenger_ext(&messenger_info, None, None) }.expect("Failed to create debug messenger!")
     } else {
         // fallback to default callback if validation layers arn't on
         //we don't care about custom callback if validation layers arn't on
@@ -96,7 +96,7 @@ pub fn pick_physical_device_and_queue_family(
     vk::PhysicalDeviceProperties,
 ) {
     unsafe { instance.enumerate_physical_devices(None) }
-        .unwrap()
+        .expect("Failed to enumerate physical devices")
         .into_iter()
 
         // filter and map physical devices (& other stuff) for use with .max_with_key
@@ -109,15 +109,15 @@ pub fn pick_physical_device_and_queue_family(
                 // need graphics flags for rendering & presentation
                 queue_family_properties.queue_flags.contains(vk::QueueFlags::GRAPHICS)
 
-                // need support for surface for le window
-                && instance.get_physical_device_surface_support_khr(physical_device, index as u32, *surface, None).unwrap() 
+                // need support for surface for window
+                && instance.get_physical_device_surface_support_khr(physical_device, index as u32, *surface, None).expect("Failed to check physical device support for surface!") 
                 == true}) {
                     Some(queue_family) => queue_family as u32,
                     None => return None,
                 };
 
             // get all formats supported by device
-            let formats = instance.get_physical_device_surface_formats_khr(physical_device, *surface, None).unwrap();
+            let formats = instance.get_physical_device_surface_formats_khr(physical_device, *surface, None).expect("Failed to query physical device supported format!");
 
             // prefer 32bit srgba
             let format = match formats.iter().find(|surface_format| { 
@@ -132,12 +132,12 @@ pub fn pick_physical_device_and_queue_family(
 
             let present_mode = instance.get_physical_device_surface_present_modes_khr(physical_device, *surface, None)
             // prefer uncapped fps
-                .unwrap().into_iter().find(|present_mode| present_mode == &vk::PresentModeKHR::IMMEDIATE_KHR)
+                .expect("Failed to get physical device present modes").into_iter().find(|present_mode| present_mode == &vk::PresentModeKHR::IMMEDIATE_KHR)
                 // FIFO as fallback
                 .unwrap_or(vk::PresentModeKHR::FIFO_KHR);
 
             // get supported device extensions
-            let supported_device_extensions = instance.enumerate_device_extension_properties(physical_device, None, None).unwrap();
+            let supported_device_extensions = instance.enumerate_device_extension_properties(physical_device, None, None).expect("Failed to get supported device extensions!");
 
             // check for lack of support for all the required device extensions
             if !device_extensions.iter().all(|device_extension| {
@@ -177,7 +177,7 @@ pub fn get_logical_device_and_queue(instance: &InstanceLoader, physical_device: 
     let device_info = vk::DeviceCreateInfoBuilder::new().queue_create_infos(&queue_infos)
         .enabled_features(&features).enabled_extension_names(device_extensions).enabled_layer_names(device_layers);
 
-    let device = DeviceLoader::new(&instance, physical_device, &device_info, None).unwrap();
+    let device = DeviceLoader::new(&instance, physical_device, &device_info, None).expect("Failed to create DeviceLoader!");
     let queue = unsafe { device.get_device_queue(queue_family, 0, None)};
 
     (device, queue)

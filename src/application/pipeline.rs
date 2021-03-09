@@ -14,14 +14,17 @@ pub const SHADER_ENTRY: *const c_char = cstr!("main");
 
 pub fn create_shader_modules<'a>(device: &DeviceLoader) -> (vk::ShaderModule, vk::ShaderModule) {
     // vertex shader
-    let vert_decoded = utils::decode_spv(SHADER_VERT).unwrap();
+    let vert_decoded = utils::decode_spv(SHADER_VERT).expect("Failed to decode vertex shader spv");
     let module_info = vk::ShaderModuleCreateInfoBuilder::new().code(&vert_decoded);
-    let shader_vert = unsafe { device.create_shader_module(&module_info, None, None) }.unwrap();
+    let shader_vert = unsafe { device.create_shader_module(&module_info, None, None) }
+        .expect("Failed to create vertex shader module!");
 
     // fragment shader
-    let frag_decoded = utils::decode_spv(SHADER_FRAG).unwrap();
+    let frag_decoded =
+        utils::decode_spv(SHADER_FRAG).expect("Failed to decode fragment shader spv");
     let module_info = vk::ShaderModuleCreateInfoBuilder::new().code(&frag_decoded);
-    let shader_frag = unsafe { device.create_shader_module(&module_info, None, None) }.unwrap();
+    let shader_frag = unsafe { device.create_shader_module(&module_info, None, None) }
+        .expect("Failed to create fragment shader module!");
 
     (shader_vert, shader_frag)
 }
@@ -75,7 +78,8 @@ fn create_fixed_functions(
 
     let pipeline_layout_info = vk::PipelineLayoutCreateInfoBuilder::new();
     let pipeline_layout =
-        unsafe { device.create_pipeline_layout(&pipeline_layout_info, None, None) }.unwrap();
+        unsafe { device.create_pipeline_layout(&pipeline_layout_info, None, None) }
+            .expect("Failed to create pipeline layout!");
 
     (
         input_assembly,
@@ -120,7 +124,8 @@ fn create_render_pass(format: vk::SurfaceFormatKHR, device: &DeviceLoader) -> vk
         .subpasses(&subpasses)
         .dependencies(&dependencies);
 
-    let render_pass = unsafe { device.create_render_pass(&render_pass_info, None, None) }.unwrap();
+    let render_pass = unsafe { device.create_render_pass(&render_pass_info, None, None) }
+        .expect("Failed to expect render pass!");
 
     render_pass
 }
@@ -190,8 +195,8 @@ pub fn create_graphics_pipeline<'a>(
         .subpass(0);
 
     // graphics pipeline
-    let pipeline =
-        unsafe { device.create_graphics_pipelines(None, &[pipeline_info], None) }.unwrap()[0];
+    let pipeline = unsafe { device.create_graphics_pipelines(None, &[pipeline_info], None) }
+        .expect("Failed to create graphics pipeline!")[0];
 
     (pipeline, pipeline_layout, render_pass)
 }

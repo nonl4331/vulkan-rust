@@ -106,7 +106,8 @@ impl Application {
 
         let messenger = setup::setup_debug_messenger(&instance);
 
-        let surface = unsafe { surface::create_surface(&mut instance, &window, None) }.unwrap();
+        let surface = unsafe { surface::create_surface(&mut instance, &window, None) }
+            .expect("Failed to create surface!");
 
         // needed extension for presention
         let device_extensions = vec![vk::KHR_SWAPCHAIN_EXTENSION_NAME];
@@ -291,7 +292,9 @@ impl Application {
     fn resize_window(&mut self) {
         unsafe {
             // don't resize in a non idle state
-            self.device.device_wait_idle().unwrap();
+            self.device
+                .device_wait_idle()
+                .expect("Device wait idle failed on resize window!");
 
             // cleanup swapchain and related devices
             self.destroy_swapchain_related_objects();
@@ -357,7 +360,10 @@ impl Application {
     }
 
     pub fn run(mut self) -> ! {
-        let event_loop = self.event_loop.take().unwrap();
+        let event_loop = self
+            .event_loop
+            .take()
+            .expect("Failed to take event loop out of Option!");
         event_loop.run(move |event, _, control_flow| match event {
             // Init
             Event::NewEvents(StartCause::Init) => {
@@ -374,7 +380,7 @@ impl Application {
                         u64::MAX,
                     )
                 }
-                .unwrap();
+                .expect("Failed on waiting for in_flight_fences[current_frame]!");
 
                 // get index of next image in swapchain & check for invalid swapchain
                 let result = unsafe {
@@ -388,7 +394,9 @@ impl Application {
                 };
 
                 let image_index = match result.raw {
-                    vk::Result::SUCCESS | vk::Result::SUBOPTIMAL_KHR => result.unwrap(),
+                    vk::Result::SUCCESS | vk::Result::SUBOPTIMAL_KHR => {
+                        result.expect("Failed to unwrap swapchain image!")
+                    }
                     vk::Result::ERROR_OUT_OF_DATE_KHR => {
                         self.resize_window();
                         return;
@@ -407,7 +415,7 @@ impl Application {
                         self.device
                             .wait_for_fences(&[image_in_flight], true, u64::MAX)
                     }
-                    .unwrap();
+                    .expect("Failed on wait for images_in_flight[image_index]!");
                 }
 
                 // mark swapchain image for use with current frame
@@ -429,14 +437,16 @@ impl Application {
                     .command_buffers(&command_buffer)
                     .signal_semaphores(&render_finished_semaphore);
 
-                // submit queue +
+                // submit queue + fence reset
                 unsafe {
                     let in_flight_fence = self.in_flight_fences[self.current_frame];
-                    self.device.reset_fences(&[in_flight_fence]).unwrap();
+                    self.device
+                        .reset_fences(&[in_flight_fence])
+                        .expect("failed on images_in_flight[current_frame] fence reset!");
                     self.device
                         .queue_submit(self.queue, &[submit_info], Some(in_flight_fence))
                 }
-                .unwrap();
+                .expect("Failed main queue submition!");
 
                 // present info takes &vec[]
                 let swapchain = vec![self.swapchain];
@@ -457,7 +467,9 @@ impl Application {
                     return;
                 } else {
                     match result.raw {
-                        vk::Result::SUCCESS => result.unwrap(),
+                        vk::Result::SUCCESS => {
+                            result.expect("Failed to unwrap queue presentation!")
+                        }
                         vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR => {
                             self.resize_window();
                             return;

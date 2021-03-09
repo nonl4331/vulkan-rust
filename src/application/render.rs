@@ -23,7 +23,8 @@ pub fn create_framebuffers(
                 .width(surface_capabilities.current_extent.width)
                 .height(surface_capabilities.current_extent.height)
                 .layers(1);
-            unsafe { device.create_framebuffer(&framebuffer_info, None, None) }.unwrap()
+            unsafe { device.create_framebuffer(&framebuffer_info, None, None) }
+                .expect("Failed to create create framebuffer!")
         })
         .collect();
 
@@ -36,7 +37,8 @@ pub fn create_command_pool(device: &DeviceLoader, queue_family: u32) -> vk::Comm
     let command_pool_info =
         vk::CommandPoolCreateInfoBuilder::new().queue_family_index(queue_family);
 
-    unsafe { device.create_command_pool(&command_pool_info, None, None) }.unwrap()
+    unsafe { device.create_command_pool(&command_pool_info, None, None) }
+        .expect("Failed to create command pool!")
 }
 
 pub fn allocate_command_buffers(
@@ -48,7 +50,8 @@ pub fn allocate_command_buffers(
         .command_pool(*command_pool)
         .command_buffer_count(framebuffers.len() as u32);
 
-    unsafe { device.allocate_command_buffers(&command_buffer_allocation_info) }.unwrap()
+    unsafe { device.allocate_command_buffers(&command_buffer_allocation_info) }
+        .expect("Failed to allocate command buffers!")
 }
 
 pub fn record_command_buffers(
@@ -66,7 +69,7 @@ pub fn record_command_buffers(
         let command_buffer_begin_info = vk::CommandBufferBeginInfoBuilder::new();
 
         unsafe { device.begin_command_buffer(*command_buffer, &command_buffer_begin_info) }
-            .unwrap();
+            .expect("Failed to begin recording command buffer!");
 
         // greenish clear color cause black is boring
         let clear_color = vk::ClearColorValue {
@@ -125,7 +128,9 @@ pub fn record_command_buffers(
             device.cmd_draw_indexed(*command_buffer, INDICIES.len() as u32, 1, 0, 0, 0);
             device.cmd_end_render_pass(*command_buffer);
 
-            device.end_command_buffer(*command_buffer).unwrap()
+            device
+                .end_command_buffer(*command_buffer)
+                .expect("Failed to end recording command buffer!");
         }
     }
 }
@@ -143,15 +148,24 @@ pub fn create_sync_primitives(
     let fence_info = vk::FenceCreateInfoBuilder::new().flags(vk::FenceCreateFlags::SIGNALED);
 
     let image_available_semaphore: Vec<_> = (0..MAX_FRAMES_IN_FLIGHT)
-        .map(|_| unsafe { device.create_semaphore(&semaphore_info, None, None) }.unwrap())
+        .map(|_| {
+            unsafe { device.create_semaphore(&semaphore_info, None, None) }
+                .expect("Failed to create image_available_semaphore!")
+        })
         .collect();
 
     let render_finished_semaphore: Vec<_> = (0..MAX_FRAMES_IN_FLIGHT)
-        .map(|_| unsafe { device.create_semaphore(&semaphore_info, None, None) }.unwrap())
+        .map(|_| {
+            unsafe { device.create_semaphore(&semaphore_info, None, None) }
+                .expect("Failed to create render_finished_semaphore!")
+        })
         .collect();
 
     let in_flight_fences = (0..MAX_FRAMES_IN_FLIGHT)
-        .map(|_| unsafe { device.create_fence(&fence_info, None, None) }.unwrap())
+        .map(|_| {
+            unsafe { device.create_fence(&fence_info, None, None) }
+                .expect("Failed to create in_flight_fences!")
+        })
         .collect();
 
     let images_in_flight = (0..swapchain_size).map(|_| vk::Fence::null()).collect();

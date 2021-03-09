@@ -16,7 +16,7 @@ pub fn create_swapchain_and_images(
     let surface_capabilities = unsafe {
         instance.get_physical_device_surface_capabilities_khr(physical_device, surface, None)
     }
-    .unwrap();
+    .expect("Failed to get physical device surface capabilities!");
 
     // min + 1 to prevent stalling by the driver because of availibility
     let mut image_count = surface_capabilities.min_image_count + 1;
@@ -43,8 +43,10 @@ pub fn create_swapchain_and_images(
         .clipped(true)
         .old_swapchain(vk::SwapchainKHR::null());
 
-    let swapchain = unsafe { device.create_swapchain_khr(&swapchain_info, None, None) }.unwrap();
-    let swapchain_images = unsafe { device.get_swapchain_images_khr(swapchain, None) }.unwrap();
+    let swapchain = unsafe { device.create_swapchain_khr(&swapchain_info, None, None) }
+        .expect("Failed to create swapchain!");
+    let swapchain_images = unsafe { device.get_swapchain_images_khr(swapchain, None) }
+        .expect("Failed to get swapchain images!");
 
     (swapchain, swapchain_images, surface_capabilities)
 }
@@ -82,7 +84,8 @@ pub fn get_image_views(
                 .components(component_mapping)
                 .subresource_range(subresource_range);
 
-            unsafe { device.create_image_view(&image_view_info, None, None) }.unwrap()
+            unsafe { device.create_image_view(&image_view_info, None, None) }
+                .expect("Failed to create image view!")
         })
         .collect();
 
