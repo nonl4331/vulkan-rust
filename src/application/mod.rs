@@ -517,6 +517,11 @@ impl Application {
 
             // Loop destruction
             Event::LoopDestroyed => unsafe {
+                // don't destroy in a non idle state
+                self.device
+                    .device_wait_idle()
+                    .expect("Device wait idle failed on resize window!");
+
                 // destroys objects that need change with window resize
                 self.destroy_swapchain_related_objects();
 
