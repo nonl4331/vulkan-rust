@@ -30,13 +30,14 @@ pub fn create_shader_modules<'a>(device: &DeviceLoader) -> (vk::ShaderModule, vk
 }
 
 // stuff for graphics pipeline bar render pass, pipeline layout (WIP) and shader stages
-fn create_fixed_functions(
-    device: &DeviceLoader,
+fn create_fixed_functions<'a>(
+    device: &'a DeviceLoader,
+    descriptor_set_layouts: &[vk::DescriptorSetLayout],
 ) -> (
-    vk::PipelineInputAssemblyStateCreateInfoBuilder<'_>,
-    vk::PipelineRasterizationStateCreateInfoBuilder<'_>,
-    vk::PipelineMultisampleStateCreateInfoBuilder<'_>,
-    Vec<vk::PipelineColorBlendAttachmentStateBuilder<'_>>,
+    vk::PipelineInputAssemblyStateCreateInfoBuilder<'a>,
+    vk::PipelineRasterizationStateCreateInfoBuilder<'a>,
+    vk::PipelineMultisampleStateCreateInfoBuilder<'a>,
+    Vec<vk::PipelineColorBlendAttachmentStateBuilder<'a>>,
     vk::PipelineLayout,
 ) {
     // how vertices are interpreted, TRIANGLE_LIST is just regular triangles not triangle strip
@@ -44,14 +45,14 @@ fn create_fixed_functions(
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
         .primitive_restart_enable(false);
 
-    // pretty normal setttings, backface culling, clockwise front facing
+    // pretty normal setttings, no backface culling, clockwise front facing
     let rasterizer = vk::PipelineRasterizationStateCreateInfoBuilder::new()
         .depth_clamp_enable(false)
         .rasterizer_discard_enable(false)
         .polygon_mode(vk::PolygonMode::FILL)
         .line_width(1.0)
-        .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::CLOCKWISE);
+        .cull_mode(vk::CullModeFlags::NONE)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
 
     // disabled for now
     let multisampling = vk::PipelineMultisampleStateCreateInfoBuilder::new()
@@ -76,7 +77,8 @@ fn create_fixed_functions(
         .color_blend_op(vk::BlendOp::ADD)
         .alpha_blend_op(vk::BlendOp::ADD)];
 
-    let pipeline_layout_info = vk::PipelineLayoutCreateInfoBuilder::new();
+    let pipeline_layout_info =
+        vk::PipelineLayoutCreateInfoBuilder::new().set_layouts(descriptor_set_layouts);
     let pipeline_layout =
         unsafe { device.create_pipeline_layout(&pipeline_layout_info, None, None) }
             .expect("Failed to create pipeline layout!");
@@ -130,11 +132,70 @@ fn create_render_pass(format: vk::SurfaceFormatKHR, device: &DeviceLoader) -> vk
     render_pass
 }
 
+pub fn create_descriptor_pool(device: &DeviceLoader, swapchain_length: u32) -> vk::DescriptorPool {
+    let pool_size = &[vk::DescriptorPoolSizeBuilder::new()
+        ._type(vk::DescriptorType::UNIFORM_BUFFER)
+        .descriptor_count(swapchain_length)];
+
+    let pool_info = vk::DescriptorPoolCreateInfoBuilder::new()
+        .pool_sizes(pool_size)
+        .max_sets(swapchain_length);
+
+    unsafe { device.create_descriptor_pool(&pool_info, None, None) }
+        .expect("Failed to create descriptor set!")
+}
+
+pub fn create_descriptor_set_layout(device: &DeviceLoader) -> vk::DescriptorSetLayout {
+    let binding = &[vk::DescriptorSetLayoutBindingBuilder::new()
+        .binding(0)
+        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+        .descriptor_count(1)
+        .stage_flags(vk::ShaderStageFlags::VERTEX)];
+
+    let create_info = vk::DescriptorSetLayoutCreateInfoBuilder::new().bindings(binding);
+
+    unsafe { device.create_descriptor_set_layout(&create_info, None, None) }
+        .expect("Failed to create descriptor set layout!")
+}
+
+pub fn create_descriptor_sets(
+    device: &DeviceLoader,
+    layout: &vk::DescriptorSetLayout,
+    pool: &vk::DescriptorPool,
+    uniform_buffer: &Vec<vk::Buffer>,
+    swapchain_length: usize,
+) -> Vec<vk::DescriptorSet> {
+    let layouts: &Vec<vk::DescriptorSetLayout> = &vec![*layout; swapchain_length];
+
+    let alloc_info = vk::DescriptorSetAllocateInfoBuilder::new()
+        .set_layouts(layouts)
+        .descriptor_pool(*pool);
+
+    let descriptor_sets = unsafe { device.allocate_descriptor_sets(&alloc_info) }
+        .expect("Failed to allocate descriptor sets!");
+
+    for (index, set) in descriptor_sets.iter().enumerate() {
+        let buffer_info = &[vk::DescriptorBufferInfoBuilder::new()
+            .buffer(uniform_buffer[index])
+            .range(vk::WHOLE_SIZE)];
+        let descriptor_write = &[vk::WriteDescriptorSetBuilder::new()
+            .dst_set(*set)
+            .dst_binding(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .buffer_info(buffer_info)];
+
+        unsafe {
+            device.update_descriptor_sets(descriptor_write, &[]);
+        }
+    }
+    descriptor_sets
+}
+
 pub fn create_graphics_pipeline<'a>(
     device: &DeviceLoader,
     shader_vert: vk::ShaderModule,
     shader_frag: vk::ShaderModule,
-
+    descriptor_set_layout: &vk::DescriptorSetLayout,
     format: vk::SurfaceFormatKHR,
 ) -> (vk::Pipeline, vk::PipelineLayout, vk::RenderPass) {
     // vertex info
@@ -147,7 +208,7 @@ pub fn create_graphics_pipeline<'a>(
 
     // create fixed functions
     let (input_assembly, rasterizer, multisampling, color_blend_attachments, pipeline_layout) =
-        create_fixed_functions(device);
+        create_fixed_functions(device, &[*descriptor_set_layout]);
 
     // make the borrow checker happy and create it here :)
     let viewport_state = vk::PipelineViewportStateCreateInfoBuilder::new()

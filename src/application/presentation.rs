@@ -6,7 +6,7 @@ use std::cmp::{max, min};
 
 pub fn create_swapchain_and_images(
     instance: &InstanceLoader,
-    physical_device: vk::PhysicalDevice,
+    physical_device: &vk::PhysicalDevice,
     surface: vk::SurfaceKHR,
     format: vk::SurfaceFormatKHR,
     present_mode: vk::PresentModeKHR,
@@ -14,7 +14,7 @@ pub fn create_swapchain_and_images(
 ) -> (SwapchainKHR, Vec<Image>, SurfaceCapabilitiesKHR) {
     // get surface capabilities
     let surface_capabilities = unsafe {
-        instance.get_physical_device_surface_capabilities_khr(physical_device, surface, None)
+        instance.get_physical_device_surface_capabilities_khr(*physical_device, surface, None)
     }
     .expect("Failed to get physical device surface capabilities!");
 

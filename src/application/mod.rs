@@ -17,6 +17,7 @@ mod model;
 mod buffer;
 
 use crate::application::setup::LAYER_KHRONOS_VALIDATION;
+use std::time::Instant;
 use winit::dpi::PhysicalSize;
 
 use erupt::vk;
@@ -63,21 +64,35 @@ pub struct Application {
     pub shader_vert: vk::ShaderModule,
     pub shader_frag: vk::ShaderModule,
     pub render_pass: vk::RenderPass,
+    pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub pipeline_layout: vk::PipelineLayout,
     pub pipeline: vk::Pipeline,
     pub framebuffers: Vec<vk::Framebuffer>,
     pub command_pool: vk::CommandPool,
+
+    // buffers
     pub vertex_buffer: vk::Buffer,
     pub vertex_buffer_memory: vk::DeviceMemory,
     pub index_buffer: vk::Buffer,
     pub index_buffer_memory: vk::DeviceMemory,
+    pub uniform_buffer: Vec<vk::Buffer>,
+    pub uniform_buffer_memory: Vec<vk::DeviceMemory>,
     pub command_buffers: Vec<vk::CommandBuffer>,
+
+    pub descriptor_pool: vk::DescriptorPool,
+    pub descriptor_sets: Vec<vk::DescriptorSet>,
+
+    // semaphores and fences
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
     in_flight_fences: Vec<vk::Fence>,
     images_in_flight: Vec<vk::Fence>,
+
+    // state
+    start: Instant,
     current_frame: usize,
     resized: bool,
+    pub ubo: model::UniformBufferObject,
 
     // instance loader is at bottom due to drop order
     pub instance: InstanceLoader,
@@ -144,7 +159,7 @@ impl Application {
         let (swapchain, swapchain_images, surface_capabilities) =
             presentation::create_swapchain_and_images(
                 &instance,
-                physical_device,
+                &physical_device,
                 surface,
                 surface_format,
                 present_mode,
@@ -155,11 +170,19 @@ impl Application {
         let swapchain_image_views =
             presentation::get_image_views(&swapchain_images, &device, surface_format);
 
+        // create descriptor set layout
+        let descriptor_set_layout = pipeline::create_descriptor_set_layout(&device);
+
         let (shader_vert, shader_frag) = pipeline::create_shader_modules(&device);
 
         // graphics pipeline & render pass
-        let (pipeline, pipeline_layout, render_pass) =
-            pipeline::create_graphics_pipeline(&device, shader_vert, shader_frag, surface_format);
+        let (pipeline, pipeline_layout, render_pass) = pipeline::create_graphics_pipeline(
+            &device,
+            shader_vert,
+            shader_frag,
+            &descriptor_set_layout,
+            surface_format,
+        );
 
         // create framebuffers
         let framebuffers = render::create_framebuffers(
@@ -172,7 +195,7 @@ impl Application {
         // create command pool
         let command_pool = render::create_command_pool(&device, queue_family);
 
-        // create vertex_buffer
+        // create vertex buffer
         let (vertex_buffer, vertex_buffer_memory) = buffer::create_vertex_buffer(
             &instance,
             &device,
@@ -181,13 +204,34 @@ impl Application {
             &queue,
         );
 
-        // create index_buffer
+        // create index buffer
         let (index_buffer, index_buffer_memory) = buffer::create_index_buffer(
             &instance,
             &device,
             &physical_device,
             &command_pool,
             &queue,
+        );
+
+        // create uniform buffers
+        let (uniform_buffer, uniform_buffer_memory) = buffer::create_uniform_buffer(
+            &instance,
+            &physical_device,
+            &device,
+            swapchain_images.len(),
+        );
+
+        // create descriptor pool
+        let descriptor_pool =
+            pipeline::create_descriptor_pool(&device, swapchain_images.len() as u32);
+
+        // create descriptor sets
+        let descriptor_sets = pipeline::create_descriptor_sets(
+            &device,
+            &descriptor_set_layout,
+            &descriptor_pool,
+            &uniform_buffer,
+            swapchain_images.len(),
         );
 
         // allocate command buffers
@@ -200,6 +244,8 @@ impl Application {
             &pipeline,
             &command_buffers,
             &framebuffers,
+            &descriptor_sets,
+            &pipeline_layout,
             &render_pass,
             &surface_capabilities,
             &vertex_buffer,
@@ -215,6 +261,8 @@ impl Application {
         ) = render::create_sync_primitives(&device, swapchain_images.len());
 
         let (current_frame, resized) = (0, false);
+
+        let ubo = model::UniformBufferObject::new();
 
         // Struct creation
         Application {
@@ -238,6 +286,7 @@ impl Application {
             shader_vert,
             shader_frag,
             render_pass,
+            descriptor_set_layout,
             pipeline_layout,
             pipeline,
             framebuffers,
@@ -246,13 +295,19 @@ impl Application {
             vertex_buffer_memory,
             index_buffer,
             index_buffer_memory,
+            uniform_buffer,
+            uniform_buffer_memory,
+            descriptor_pool,
+            descriptor_sets,
             command_buffers,
             image_available_semaphores,
             render_finished_semaphores,
             in_flight_fences,
             images_in_flight,
             current_frame,
+            start: Instant::now(),
             resized,
+            ubo,
         }
     }
 
@@ -286,6 +341,20 @@ impl Application {
             // swapchain destruction
             self.device
                 .destroy_swapchain_khr(Some(self.swapchain), None);
+
+            // uniform buffers destruction
+            for (&buffer, &memory) in self
+                .uniform_buffer
+                .iter()
+                .zip(self.uniform_buffer_memory.iter())
+            {
+                self.device.destroy_buffer(Some(buffer), None);
+                self.device.free_memory(Some(memory), None);
+            }
+
+            // destory descriptor pool & sets
+            self.device
+                .destroy_descriptor_pool(Some(self.descriptor_pool), None);
         }
     }
 
@@ -303,7 +372,7 @@ impl Application {
             let (swapchain, swapchain_images, surface_capabilities) =
                 presentation::create_swapchain_and_images(
                     &self.instance,
-                    self.physical_device,
+                    &self.physical_device,
                     self.surface,
                     self.surface_format,
                     self.present_mode,
@@ -319,6 +388,7 @@ impl Application {
                 &self.device,
                 self.shader_vert,
                 self.shader_frag,
+                &self.descriptor_set_layout,
                 self.surface_format,
             );
 
@@ -328,6 +398,27 @@ impl Application {
                 &swapchain_image_views,
                 &render_pass,
                 &surface_capabilities,
+            );
+
+            // create uniform buffers
+            let (uniform_buffer, uniform_buffer_memory) = buffer::create_uniform_buffer(
+                &self.instance,
+                &self.physical_device,
+                &self.device,
+                swapchain_images.len(),
+            );
+
+            // create descriptor pool
+            let descriptor_pool =
+                pipeline::create_descriptor_pool(&self.device, swapchain_images.len() as u32);
+
+            // create descriptor sets
+            let descriptor_sets = pipeline::create_descriptor_sets(
+                &self.device,
+                &self.descriptor_set_layout,
+                &descriptor_pool,
+                &uniform_buffer,
+                swapchain_images.len(),
             );
 
             // allocate command buffers
@@ -340,6 +431,8 @@ impl Application {
                 &pipeline,
                 &command_buffers,
                 &framebuffers,
+                &descriptor_sets,
+                &pipeline_layout,
                 &render_pass,
                 &surface_capabilities,
                 &self.vertex_buffer,
@@ -354,6 +447,10 @@ impl Application {
             self.pipeline_layout = pipeline_layout;
             self.render_pass = render_pass;
             self.framebuffers = framebuffers;
+            self.uniform_buffer = uniform_buffer;
+            self.uniform_buffer_memory = uniform_buffer_memory;
+            self.descriptor_pool = descriptor_pool;
+            self.descriptor_sets = descriptor_sets;
             self.command_buffers = command_buffers;
             self.resized = false;
         };
@@ -405,6 +502,14 @@ impl Application {
                         panic!("Failed to aquire swap chain image!");
                     }
                 };
+
+                // update uniform buffer
+                buffer::update_uniform_buffer(
+                    &self.device,
+                    &mut self.ubo,
+                    &self.start,
+                    &self.uniform_buffer_memory[image_index as usize],
+                );
 
                 // get fence for swapchain image use
                 let image_in_flight = self.images_in_flight[image_index as usize];
@@ -524,6 +629,10 @@ impl Application {
 
                 // destroys objects that need change with window resize
                 self.destroy_swapchain_related_objects();
+
+                // destory descriptor set layout
+                self.device
+                    .destroy_descriptor_set_layout(Some(self.descriptor_set_layout), None);
 
                 // destory index buffer and free memory
                 self.device.destroy_buffer(Some(self.index_buffer), None);

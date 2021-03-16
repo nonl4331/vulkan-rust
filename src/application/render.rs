@@ -59,13 +59,19 @@ pub fn record_command_buffers(
     pipeline: &vk::Pipeline,
     command_buffers: &Vec<vk::CommandBuffer>,
     framebuffers: &Vec<Framebuffer>,
+    descriptor_sets: &Vec<vk::DescriptorSet>,
+    pipeline_layout: &vk::PipelineLayout,
     render_pass: &vk::RenderPass,
     surface_capabilities: &SurfaceCapabilitiesKHR,
     vertex_buffer: &vk::Buffer,
     index_buffer: &vk::Buffer,
 ) {
     // command buffer for each framebuffer
-    for (command_buffer, framebuffer) in command_buffers.iter().zip(framebuffers.iter()) {
+    for ((command_buffer, framebuffer), descriptor_set) in command_buffers
+        .iter()
+        .zip(framebuffers.iter())
+        .zip(descriptor_sets.iter())
+    {
         let command_buffer_begin_info = vk::CommandBufferBeginInfoBuilder::new();
 
         unsafe { device.begin_command_buffer(*command_buffer, &command_buffer_begin_info) }
@@ -124,6 +130,16 @@ pub fn record_command_buffers(
             // set viewport & scissors (incase of resize)
             device.cmd_set_viewport(*command_buffer, 0, &viewports);
             device.cmd_set_scissor(*command_buffer, 0, &scissors);
+
+            // bind uniform buffer
+            device.cmd_bind_descriptor_sets(
+                *command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                *pipeline_layout,
+                0,
+                &[*descriptor_set],
+                &[],
+            );
 
             device.cmd_draw_indexed(*command_buffer, INDICIES.len() as u32, 1, 0, 0, 0);
             device.cmd_end_render_pass(*command_buffer);

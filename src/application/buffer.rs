@@ -1,6 +1,8 @@
-use crate::application::model::{Index, Vertex, INDICIES, VERTICES};
+use crate::application::model::{Index, UniformBufferObject, Vertex, INDICIES, VERTICES};
 use core::ffi::c_void;
 use erupt::{vk, DeviceLoader, InstanceLoader};
+
+use std::time::Instant;
 
 use std::mem::size_of;
 
@@ -170,6 +172,63 @@ pub fn create_index_buffer(
     (index_buffer, index_buffer_memory)
 }
 
+pub fn create_uniform_buffer(
+    instance: &InstanceLoader,
+    physical_device: &vk::PhysicalDevice,
+    device: &DeviceLoader,
+    swapchain_length: usize,
+) -> (Vec<vk::Buffer>, Vec<vk::DeviceMemory>) {
+    let buffer_size = size_of::<UniformBufferObject>() as u64;
+
+    // create uniform buffer & memory for each image in swapchain
+    (0..swapchain_length)
+        .map(|_| {
+            create_buffer(
+                instance,
+                physical_device,
+                device,
+                buffer_size,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::SharingMode::EXCLUSIVE,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )
+        })
+        .unzip()
+}
+
+pub fn update_uniform_buffer(
+    device: &DeviceLoader,
+    ubo: &mut UniformBufferObject,
+    start: &Instant,
+    uniform_buffer_memory: &vk::DeviceMemory,
+) {
+    let duration = Instant::now().duration_since(*start).as_secs_f32();
+
+    ubo.model = ultraviolet::mat::Mat4::from_rotation_z(duration);
+
+    // copy data to buffer
+    unsafe {
+        let mut data: *mut c_void = core::ptr::null_mut();
+
+        // map physical_device memory to *data so we can copy onto it
+        device
+            .map_memory(
+                *uniform_buffer_memory,
+                0,
+                size_of::<UniformBufferObject>() as u64,
+                None,
+                &mut data,
+            )
+            .expect("Failed to map memory for uniform buffer!");
+
+        // copy over data to buffer
+        core::ptr::copy(ubo, data as *mut UniformBufferObject, 1);
+
+        // unmap physical_device memory as we have copied the needed data over
+        device.unmap_memory(*uniform_buffer_memory);
+    };
+}
+
 fn find_physical_device_memory(
     instance: &InstanceLoader,
     physical_device: &vk::PhysicalDevice,
@@ -206,10 +265,10 @@ pub fn copy_to_staging_buffer<T>(
         // map physical_device memory to *data so we can copy onto it
         device
             .map_memory(*buffer_memory, 0, buffer_size as u64, None, &mut data)
-            .expect("Failed to map memory for vertex buffer!");
+            .expect("Failed to map memory for staging buffer!");
 
         // copy over data to buffer
-        core::ptr::copy(buffer_data, data as *mut T, buffer_size);
+        core::ptr::copy(buffer_data, data as *mut T, 1);
 
         // unmap physical_device memory as we have copied the needed data over
         device.unmap_memory(*buffer_memory);
