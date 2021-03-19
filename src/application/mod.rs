@@ -16,6 +16,9 @@ mod model;
 // buffers
 mod buffer;
 
+// state
+mod state;
+
 use crate::application::setup::LAYER_KHRONOS_VALIDATION;
 use std::time::Instant;
 use winit::dpi::PhysicalSize;
@@ -468,125 +471,7 @@ impl Application {
             }
 
             Event::MainEventsCleared => {
-                // wait for image at current index to finish render to avoid submiting more than gpu can handle
-                // u64::MAX disables cooldown
-                unsafe {
-                    self.device.wait_for_fences(
-                        &[self.in_flight_fences[self.current_frame]],
-                        true,
-                        u64::MAX,
-                    )
-                }
-                .expect("Failed on waiting for in_flight_fences[current_frame]!");
-
-                // get index of next image in swapchain & check for invalid swapchain
-                let result = unsafe {
-                    self.device.acquire_next_image_khr(
-                        self.swapchain,
-                        u64::MAX,
-                        Some(self.image_available_semaphores[self.current_frame]),
-                        None,
-                        None,
-                    )
-                };
-
-                let image_index = match result.raw {
-                    vk::Result::SUCCESS | vk::Result::SUBOPTIMAL_KHR => {
-                        result.expect("Failed to unwrap swapchain image!")
-                    }
-                    vk::Result::ERROR_OUT_OF_DATE_KHR => {
-                        self.resize_window();
-                        return;
-                    }
-                    _ => {
-                        panic!("Failed to aquire swap chain image!");
-                    }
-                };
-
-                // update uniform buffer
-                buffer::update_uniform_buffer(
-                    &self.device,
-                    &mut self.ubo,
-                    &self.start,
-                    &self.uniform_buffer_memory[image_index as usize],
-                );
-
-                // get fence for swapchain image use
-                let image_in_flight = self.images_in_flight[image_index as usize];
-
-                // check if image is in use and if so wait for image to become available
-                if !image_in_flight.is_null() {
-                    unsafe {
-                        self.device
-                            .wait_for_fences(&[image_in_flight], true, u64::MAX)
-                    }
-                    .expect("Failed on wait for images_in_flight[image_index]!");
-                }
-
-                // mark swapchain image for use with current frame
-                self.images_in_flight[image_index as usize] =
-                    self.in_flight_fences[self.current_frame];
-
-                // semaphores for current frame
-                let image_available_semaphore =
-                    vec![self.image_available_semaphores[self.current_frame]];
-                let render_finished_semaphore =
-                    vec![self.render_finished_semaphores[self.current_frame]];
-
-                // submit info takes &vec
-                let command_buffer = vec![self.command_buffers[image_index as usize]];
-
-                let submit_info = vk::SubmitInfoBuilder::new()
-                    .wait_semaphores(&image_available_semaphore)
-                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-                    .command_buffers(&command_buffer)
-                    .signal_semaphores(&render_finished_semaphore);
-
-                // submit queue + fence reset
-                unsafe {
-                    let in_flight_fence = self.in_flight_fences[self.current_frame];
-                    self.device
-                        .reset_fences(&[in_flight_fence])
-                        .expect("failed on images_in_flight[current_frame] fence reset!");
-                    self.device
-                        .queue_submit(self.queue, &[submit_info], Some(in_flight_fence))
-                }
-                .expect("Failed main queue submition!");
-
-                // present info takes &vec[]
-                let swapchain = vec![self.swapchain];
-
-                // present info tkaes &vec[]
-                let image_index = vec![image_index];
-
-                let present_info = vk::PresentInfoKHRBuilder::new()
-                    .wait_semaphores(&render_finished_semaphore)
-                    .swapchains(&swapchain)
-                    .image_indices(&image_index);
-
-                // presentation
-                let result = unsafe { self.device.queue_present_khr(self.queue, &present_info) };
-
-                if self.resized {
-                    self.resize_window();
-                    return;
-                } else {
-                    match result.raw {
-                        vk::Result::SUCCESS => {
-                            result.expect("Failed to unwrap queue presentation!")
-                        }
-                        vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR => {
-                            self.resize_window();
-                            return;
-                        }
-                        _ => {
-                            panic!("Failed to present swap chain image!")
-                        }
-                    }
-                }
-
-                // get current_frame to next frame
-                self.current_frame = (self.current_frame + 1) % render::MAX_FRAMES_IN_FLIGHT;
+                state::main_events_cleared(&mut self);
             }
 
             // Window events
@@ -621,69 +506,9 @@ impl Application {
             },
 
             // Loop destruction
-            Event::LoopDestroyed => unsafe {
-                // don't destroy in a non idle state
-                self.device
-                    .device_wait_idle()
-                    .expect("Device wait idle failed on resize window!");
-
-                // destroys objects that need change with window resize
-                self.destroy_swapchain_related_objects();
-
-                // destory descriptor set layout
-                self.device
-                    .destroy_descriptor_set_layout(Some(self.descriptor_set_layout), None);
-
-                // destory index buffer and free memory
-                self.device.destroy_buffer(Some(self.index_buffer), None);
-                self.device
-                    .free_memory(Some(self.index_buffer_memory), None);
-
-                // destory vertex buffer and free memory
-                self.device.destroy_buffer(Some(self.vertex_buffer), None);
-                self.device
-                    .free_memory(Some(self.vertex_buffer_memory), None);
-
-                // destroy all semaphores
-                for &semaphore in self
-                    .image_available_semaphores
-                    .iter()
-                    .chain(self.render_finished_semaphores.iter())
-                {
-                    self.device.destroy_semaphore(Some(semaphore), None);
-                }
-
-                // destroy fences (remember in_flight_fences[index_index] = frames_in_flight[current_frame])
-                for &fence in &self.in_flight_fences {
-                    self.device.destroy_fence(Some(fence), None);
-                }
-
-                // destroy command_pool
-                self.device
-                    .destroy_command_pool(Some(self.command_pool), None);
-
-                // destory shader modules
-                self.device
-                    .destroy_shader_module(Some(self.shader_vert), None);
-                self.device
-                    .destroy_shader_module(Some(self.shader_frag), None);
-
-                // logical device destruction
-                self.device.destroy_device(None);
-
-                // surface destruction
-                self.instance.destroy_surface_khr(Some(self.surface), None);
-
-                // messenger descruction
-                if !self.messenger.is_null() {
-                    self.instance
-                        .destroy_debug_utils_messenger_ext(Some(self.messenger), None);
-                }
-
-                // instance destruction
-                self.instance.destroy_instance(None);
-                println!("All cleaned up!")
-            },
+            Event::LoopDestroyed => {
+                state::loop_destroyed(&mut self);
+            }
 
             _ => (),
         })

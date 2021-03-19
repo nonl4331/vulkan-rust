@@ -153,7 +153,6 @@ pub fn pick_physical_device_and_queue_family(
                 return None;
             }
 
-            // get physical device properties
             let device_properties = instance.get_physical_device_properties(physical_device, None);
 
             // return info for physical device
